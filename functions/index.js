@@ -20,6 +20,7 @@ exports.exportGetRestaurants = functions.region('europe-west2').https.onRequest(
     categories,
     markers,
     kilometres,
+    allergenicSelect,
     map,
 ) => {
     try {
@@ -32,9 +33,10 @@ exports.exportGetRestaurants = functions.region('europe-west2').https.onRequest(
         var radiusEarth = 6371;
 
         var nearbyMarkers = {};
+        var newMarkers = {};
 
         const restaurants = await firestore.collection('Restaurants').get();
-        
+
         const rest = restaurants.docs.map(r => ({
             ID: r.id,
             ...r.data()
@@ -106,7 +108,7 @@ exports.exportGetRestaurants = functions.region('europe-west2').https.onRequest(
                 if (nearbyMarkers.isNotEmpty) {
                     var markers = [];
                     for (var market in nearbyMarkers) {
-                        if (market.markerId.value == restaurant.id) {
+                        if (market.markerId.value == restaurant.ID) {
                             markers.add(restaurant);
                         }
                     }
@@ -124,31 +126,73 @@ exports.exportGetRestaurants = functions.region('europe-west2').https.onRequest(
                 validateTerrace &&
                 validateCategory &&
                 validateNearbyMarkers) {
-                restaurantList.add(restaurant);
+                var getProducts =
+                    await firestore
+                        .collection('Products')
+                        .where('id_restaurant', isEqualTo(restaurant.ID))
+                        .get();
+
+                if (allergenicSelect.isNotEmpty) {
+                    if (getProducts.isNotEmpty) {
+                        for (var allergens in allergenicSelect) {
+                            for (var product in getProducts) {
+                                var select = product.allergens
+                                    .where((aller) => aller.name != allergens.name);
+                                if (select.isNotEmpty) {
+                                    restaurant.searchProducts?.add(product);
+                                    restaurantList.add(restaurant);
+                                }
+                            }
+                        }
+                    }
+                } else if (getProducts.isNotEmpty) {
+                    var product = getProducts
+                        .where((prod) => prod.urlProduct != '' && prod.urlImage != '');
+                    if (product.isNotEmpty) {
+                        var list = [];
+                        for (var prod in product) {
+                            list.add(prod);
+                        }
+                        restaurant.searchProducts = list;
+                        restaurantList.add(restaurant);
+                    }
+                }
+                if (map) {
+                    for (var marker in markers) {
+                        if (restaurant.ID == marker.markerId.value) {
+                            newMarkers.add(marker);
+                        }
+                    }
+                }
+                // kilometres = 0;
             }
         }
 
-        var restaurantsToExport = [];
+        var productList = [];
+        for (var resta in restaurantList) {
+            for (var prod in resta.searchProducts ?? []) {
+                productList.add(prod);
+            }
+        }
 
-        restaurantList.forEach(doc => {
+        productList.forEach(doc => {
             const resInfo = doc.data();
-            restaurantsToExport.push({
+            productList.push({
                 id: resInfo.id,
-                logo: resInfo.logo,
                 name: resInfo.name,
-                bookings: resInfo.bookings,
-                address: resInfo.address,
-                terrace: resInfo.terrace,
-                // urlImage: resInfo.name,
-                // urlVideo: resInfo.name,
+                restaurantId: resInfo.restaurantId,
+                urlImage: resInfo.urlImage,
+                urlProduct: resInfo.urlProduct,
             })
         })
-		return restaurantsToExport;
+        return productList;
     } catch (err) {
         console.error(err)
         return res.status(500).send(err)
     }
 })
+
+
 // const functions = require("firebase-functions");
 // const admin = require('firebase-admin');
 // const { transporter } = require("./utils/eTransporter");
